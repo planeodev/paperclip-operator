@@ -1,0 +1,32 @@
+# planeodev fork only (not for upstream): builds ghcr.io/planeodev/paperclip-operator with the shared Vionix pipeline
+# (ohanalabs-ai/github-platform), the way every planeodev image is built (planeo-infra CLAUDE.md §9):
+#   - every PR (any branch, incl. feature branches) → a PR image (pr/<N>), deleted with the PR;
+#   - push to planeo/main (a merge) → the <branch>-<sha7> image planeo-infra pins.
+# Same shape as ohanalabs-ai/vionix-engram's callers (no Docker Hub inputs: the pipeline dropped them).
+name: 🐳 planeo docker-multiarch-cicd
+run-name: 🐳 paperclip-operator image — ${{ github.event_name }} ${{ github.event.pull_request.number && format('PR {0}', github.event.pull_request.number) || github.ref_name }} ${{ github.event.pull_request.head.sha || github.sha }}
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  push:
+    branches: [planeo/main]
+  workflow_dispatch:
+
+jobs:
+  docker-multiarch:
+    name: 🐳 docker
+    uses: ohanalabs-ai/github-platform/.github/workflows/docker-multiarch-cicd.yaml@main
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+      pull-requests: write
+    with:
+      registry: ghcr.io
+      platforms: linux/amd64,linux/arm64
+      docker-compose-file-name: docker-compose.yaml
+      docker-compose-target-service: paperclip-operator
+      push-attestations: false

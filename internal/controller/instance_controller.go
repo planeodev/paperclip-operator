@@ -125,7 +125,17 @@ type InstanceReconciler struct {
 	// httpHealthProbe, constructed once via healthClientOnce.
 	healthClient     *http.Client
 	healthClientOnce sync.Once
+
+	// NamespacedMode is set when the manager watches only WATCH_NAMESPACES (planeodev fork). The operator
+	// then holds no cluster-wide RBAC, so it refuses every feature that needs a ClusterRole/ClusterRoleBinding
+	// (multi-namespace cloud sandbox, Kubernetes execution mode) instead of failing on a Forbidden mid-reconcile,
+	// and skips the cluster-scoped cleanup (there is nothing it could have created).
+	NamespacedMode bool
 }
+
+// errClusterRBACRefused is returned in NamespacedMode for any feature that needs cluster-scoped RBAC.
+var errClusterRBACRefused = fmt.Errorf("cluster-scoped RBAC is disabled in namespaced mode (WATCH_NAMESPACES is set): " +
+	"spec.adapters.cloudSandbox.multiNamespace and Kubernetes execution mode are not available")
 
 // +kubebuilder:rbac:groups=paperclip.inc,resources=instances,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=paperclip.inc,resources=instances/status,verbs=get;update;patch
@@ -208,7 +218,9 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			r.setPhase(ctx, instance, paperclipv1alpha1.PhaseTerminating)
 
 			// Clean up cluster-scoped resources (can't use owner references)
-			if err := r.cleanupClusterScopedResources(ctx, instance); err != nil {
+			if r.NamespacedMode {
+				// nothing cluster-scoped was ever created; a Get here would need cluster-wide RBAC
+			} else if err := r.cleanupClusterScopedResources(ctx, instance); err != nil {
 				log.Error(err, "Failed to cleanup cluster-scoped resources")
 				return ctrl.Result{}, err
 			}
@@ -519,6 +531,9 @@ func (r *InstanceReconciler) reconcileSandboxRBAC(ctx context.Context, instance 
 
 	// ClusterRole + ClusterRoleBinding for multi-namespace sandbox isolation
 	if cs.MultiNamespace {
+		if r.NamespacedMode {
+			return errClusterRBACRefused
+		}
 		desiredCR := resources.BuildSandboxClusterRole(instance)
 		crObj := &rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
@@ -560,6 +575,9 @@ func (r *InstanceReconciler) reconcileExecutionRBAC(ctx context.Context, instanc
 	desiredCR := resources.BuildExecutionClusterRole(instance)
 	if desiredCR == nil {
 		return nil
+	}
+	if r.NamespacedMode {
+		return errClusterRBACRefused
 	}
 	crObj := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{Name: desiredCR.Name},
