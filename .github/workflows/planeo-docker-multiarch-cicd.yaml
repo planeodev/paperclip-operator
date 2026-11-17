@@ -1,33 +1,22 @@
-# planeodev fork only (not for upstream): builds ghcr.io/planeodev/paperclip-operator:<branch>-<sha7>
-# with the shared Vionix pipeline, the way every planeodev image is built (planeo-infra CLAUDE.md §9).
+# planeodev fork only (not for upstream): builds ghcr.io/planeodev/paperclip-operator with the shared Vionix pipeline
+# (ohanalabs-ai/github-platform), the way every planeodev image is built (planeo-infra CLAUDE.md §9):
+#   - every PR (any branch, incl. feature branches) → a PR image (pr/<N>), deleted with the PR;
+#   - push to planeo/main (a merge) → the <branch>-<sha7> image planeo-infra pins.
+# Same shape as ohanalabs-ai/vionix-engram's callers (no Docker Hub inputs: the pipeline dropped them).
 name: 🐳 planeo docker-multiarch-cicd
-run-name: 🐳 paperclip-operator image — ${{ github.event_name }} ${{ github.ref_name }} ${{ github.event.pull_request.head.sha || github.sha }}
+run-name: 🐳 paperclip-operator image — ${{ github.event_name }} ${{ github.event.pull_request.number && format('PR {0}', github.event.pull_request.number) || github.ref_name }} ${{ github.event.pull_request.head.sha || github.sha }}
 
 on:
   pull_request:
-    branches: [planeo/main]
     types: [opened, synchronize, reopened, closed]
   push:
     branches: [planeo/main]
+  workflow_dispatch:
 
 jobs:
-  setup:
-    name: 🔧 setup
-    runs-on: ubuntu-latest
-    outputs:
-      dockerhub-token: ${{ steps.secrets.outputs.token }}
-      dockerhub-username: ${{ steps.secrets.outputs.username }}
-    steps:
-      - name: Load secrets
-        id: secrets
-        run: |
-          echo "username=${{ secrets.DOCKER_REGISTRY_USERNAME }}" >> "$GITHUB_OUTPUT"
-          echo "token=${{ secrets.DOCKER_REGISTRY_TOKEN }}" >> "$GITHUB_OUTPUT"
-
   docker-multiarch:
     name: 🐳 docker
-    needs: [setup]
-    uses: vionix-proj/github-platform/.github/workflows/docker-multiarch-cicd.yaml@main
+    uses: ohanalabs-ai/github-platform/.github/workflows/docker-multiarch-cicd.yaml@main
     permissions:
       contents: write
       packages: write
@@ -40,8 +29,4 @@ jobs:
       platforms: linux/amd64,linux/arm64
       docker-compose-file-name: docker-compose.yaml
       docker-compose-target-service: paperclip-operator
-      dockerhub-registry: docker.io
-      dockerhub-namespace: ${{ github.repository_owner }}
-      dockerhub-registry-username: ${{ needs.setup.outputs.dockerhub-username }}
-      dockerhub-registry-token: ${{ needs.setup.outputs.dockerhub-token }}
-      push-attestations: "false"
+      push-attestations: false
