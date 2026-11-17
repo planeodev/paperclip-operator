@@ -1,0 +1,8 @@
+# planeodev fork: the Vionix CI (docker-multiarch-cicd) builds this one service into
+# ghcr.io/planeodev/paperclip-operator:<branch>-<sha7>. Local: docker compose build paperclip-operator
+services:
+  paperclip-operator:
+    image: ghcr.io/planeodev/paperclip-operator
+    build:
+      context: .
+      dockerfile: Dockerfile

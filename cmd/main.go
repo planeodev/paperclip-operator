@@ -21,6 +21,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -30,6 +31,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -181,8 +183,24 @@ func main() {
 		})
 	}
 
+	// Namespaced mode (planeodev fork): WATCH_NAMESPACES="ns-a,ns-b" restricts the manager's cache to
+	// those namespaces, so the operator runs with RoleBindings per namespace instead of a cluster-wide
+	// ClusterRoleBinding. Cluster-scoped kinds (PaperclipClusterDefaults) are still cached cluster-wide.
+	// Unset or empty = upstream behaviour (all namespaces).
+	watchNamespaces := parseWatchNamespaces(os.Getenv("WATCH_NAMESPACES"))
+	cacheOptions := cache.Options{}
+	if len(watchNamespaces) > 0 {
+		cacheOptions.DefaultNamespaces = map[string]cache.Config{}
+		for _, ns := range watchNamespaces {
+			cacheOptions.DefaultNamespaces[ns] = cache.Config{}
+		}
+		setupLog.Info("namespaced mode: watching only these namespaces; cluster-scoped RBAC is refused",
+			"namespaces", watchNamespaces)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
+		Cache:                  cacheOptions,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
@@ -210,6 +228,7 @@ func main() {
 		Scheme:         mgr.GetScheme(),
 		Recorder:       mgr.GetEventRecorderFor("paperclip-operator"),
 		RegistryClient: registry.NewClient(nil),
+		NamespacedMode: len(watchNamespaces) > 0,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Instance")
 		os.Exit(1)
@@ -262,4 +281,15 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// parseWatchNamespaces splits a comma-separated WATCH_NAMESPACES value, trimming blanks and dropping empties.
+func parseWatchNamespaces(v string) []string {
+	var out []string
+	for _, ns := range strings.Split(v, ",") {
+		if ns = strings.TrimSpace(ns); ns != "" {
+			out = append(out, ns)
+		}
+	}
+	return out
 }
